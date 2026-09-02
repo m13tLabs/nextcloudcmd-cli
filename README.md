@@ -16,10 +16,16 @@ distro can run a modern sync from `docker run` without a dist-upgrade.
 
 ## Image
 
+Published to GHCR and Docker Hub with identical tags each release:
+
 ```
 ghcr.io/m13tlabs/nextcloudcmd-cli:<version>   # e.g. 0.1.0
 ghcr.io/m13tlabs/nextcloudcmd-cli:<major.minor>
 ghcr.io/m13tlabs/nextcloudcmd-cli:latest
+
+m13t/nextcloudcmd-cli:<version>
+m13t/nextcloudcmd-cli:<major.minor>
+m13t/nextcloudcmd-cli:latest
 ```
 
 `linux/amd64` and `linux/arm64`. The `<version>` here is this repo's release
@@ -58,11 +64,11 @@ Run it under `flock -n` from cron so a long run never stacks:
 
 ## Releasing
 
-`VERSION` holds the current release. Run the **Release** workflow
+`config.json` holds the current release version. Run the **Release** workflow
 (`workflow_dispatch`, `patch` / `minor` / `major` / `custom`): it bumps
-`VERSION`, updates `CHANGELOG.md` from Conventional Commits via git-cliff,
-builds and pushes the multi-arch image to GHCR with provenance + SBOM, and
-opens a draft GitHub release.
+`config.json`, updates `CHANGELOG.md` from Conventional Commits via git-cliff,
+builds and pushes the multi-arch image to GHCR and Docker Hub with provenance
+and SBOM, and opens a draft GitHub release.
 
 ## License
 

@@ -31,6 +31,7 @@ on:
 
 env:
   IMAGE: ghcr.io/m13tlabs/nextcloudcmd-cli
+  DOCKERHUB_IMAGE: docker.io/m13t/nextcloudcmd-cli
 
 jobs:
   release:
@@ -69,7 +70,7 @@ jobs:
       - name: Determine release version
         id: version
         run: |
-          currentVersion="$(tr -d '[:space:]' < VERSION)"
+          currentVersion=$(jq -r '.version' config.json)
 
           case "${{ inputs.release_type }}" in
             custom)
@@ -98,11 +99,13 @@ jobs:
           IFS='.' read -r relMajor relMinor _ <<< "$releaseVersion"
           echo "release_version=$releaseVersion" >> "$GITHUB_OUTPUT"
           echo "release_version_minor=${relMajor}.${relMinor}" >> "$GITHUB_OUTPUT"
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Bump version
         run: |
-          echo "${{ steps.version.outputs.release_version }}" > VERSION
-          git add VERSION
+          jq '.version = "${{ steps.version.outputs.release_version }}"' config.json > config.json.new
+          mv config.json.new config.json
+          git add config.json
           git commit -m "Release ${{ steps.version.outputs.release_version }}"
 
       - name: Update changelog
@@ -172,17 +175,25 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKER_HUB_USER }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
       - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE }}
+          images: |
+            ${{ env.IMAGE }}
+            ${{ env.DOCKERHUB_IMAGE }}
           tags: |
             type=raw,value=${{ steps.version.outputs.release_version }}
             type=raw,value=${{ steps.version.outputs.release_version_minor }}
@@ -197,15 +208,25 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.release_version }}
+            BUILD_DATE=${{ steps.version.outputs.build_date }}
           provenance: true
           sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Attest image
-        uses: actions/attest-build-provenance@v2
+      - name: Attest image (GHCR)
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest image (Docker Hub)
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.DOCKERHUB_IMAGE }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
