@@ -217,14 +217,14 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Attest image (GHCR)
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
       - name: Attest image (Docker Hub)
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.DOCKERHUB_IMAGE }}
           subject-digest: ${{ steps.push.outputs.digest }}
