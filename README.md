@@ -1,5 +1,8 @@
 # nextcloud-cli
 
+[![CI](https://github.com/m13tLabs/nextcloudcmd-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/m13tLabs/nextcloudcmd-cli/actions/workflows/ci.yml)
+![Docker Pulls](https://img.shields.io/docker/pulls/m13t/nextcloudcmd-cli?link=https%3A%2F%2Fhub.docker.com%2Fr%2Fm13t%2Fnextcloudcmd-cli)
+
 A minimal container image bundling a **current `nextcloudcmd`** (the Nextcloud
 desktop sync client's headless CLI).
 

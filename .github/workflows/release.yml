@@ -5,239 +5,35 @@ on:
     inputs:
       release_type:
         description: 'Type of release to build: patch, minor, major, or custom'
-        options:
-          - patch
-          - minor
-          - major
-          - custom
-        default: patch
         type: choice
+        options: [patch, minor, major, custom]
+        default: patch
         required: true
       custom_version:
         description: "Version to release (only used when release_type is 'custom', e.g. 1.2.3)"
         type: string
         required: false
         default: ''
-      default_branch:
-        description: 'Branch to release from and push commits/tags back to'
-        type: string
-        required: false
-        default: 'develop'
       draft_release:
         description: 'Create the GitHub release as a draft'
         type: boolean
         required: false
         default: true
 
-env:
-  IMAGE: ghcr.io/m13tlabs/nextcloudcmd-cli
-  DOCKERHUB_IMAGE: docker.io/m13t/nextcloudcmd-cli
-
 jobs:
   release:
-    name: Release
-    runs-on: ubuntu-latest
+    uses: m13tLabs/gh-actions-templates/.github/workflows/docker-release.yml@main
     permissions:
-      contents: write
+      contents: read
       packages: write
       attestations: write
       id-token: write
-    steps:
-      - uses: actions/create-github-app-token@v3
-        id: app-token
-        with:
-          client-id: ${{ vars.CI_CLIENT_ID }}
-          private-key: ${{ secrets.CI_PRIVATE_KEY }}
-
-      - name: Get GitHub App User ID
-        id: get-user-id
-        run: echo "user-id=$(gh api "/users/${{ steps.app-token.outputs.app-slug }}[bot]" --jq .id)" >> "$GITHUB_OUTPUT"
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          token: ${{ steps.app-token.outputs.token }}
-          ref: ${{ inputs.default_branch }}
-
-      - name: Configure Git author
-        run: |
-          git config --global user.name '${{ steps.app-token.outputs.app-slug }}[bot]'
-          git config --global user.email '${{ steps.get-user-id.outputs.user-id }}+${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com'
-
-      - name: Determine release version
-        id: version
-        run: |
-          currentVersion=$(jq -r '.version' config.json)
-
-          case "${{ inputs.release_type }}" in
-            custom)
-              releaseVersion="${{ inputs.custom_version }}"
-              if [ -z "$releaseVersion" ]; then
-                echo "custom_version is required when release_type is 'custom'" >&2
-                exit 1
-              fi
-              ;;
-            major|minor|patch)
-              IFS='.' read -r major minor patch <<< "$currentVersion"
-              case "${{ inputs.release_type }}" in
-                major) major=$((major + 1)); minor=0; patch=0 ;;
-                minor) minor=$((minor + 1)); patch=0 ;;
-                patch) patch=$((patch + 1)) ;;
-              esac
-              releaseVersion="${major}.${minor}.${patch}"
-              ;;
-            *)
-              echo "Unknown release_type '${{ inputs.release_type }}'" >&2
-              exit 1
-              ;;
-          esac
-
-          echo "Releasing version $releaseVersion (current: $currentVersion)"
-          IFS='.' read -r relMajor relMinor _ <<< "$releaseVersion"
-          echo "release_version=$releaseVersion" >> "$GITHUB_OUTPUT"
-          echo "release_version_minor=${relMajor}.${relMinor}" >> "$GITHUB_OUTPUT"
-          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-
-      - name: Bump version
-        run: |
-          jq '.version = "${{ steps.version.outputs.release_version }}"' config.json > config.json.new
-          mv config.json.new config.json
-          git add config.json
-          git commit -m "Release ${{ steps.version.outputs.release_version }}"
-
-      - name: Update changelog
-        run: |
-          pip install git-cliff
-
-          if [ ! -f cliff.toml ]; then
-            cat > cliff.toml <<'EOF'
-          [changelog]
-          header = ""
-          body = """
-          {% if version %}\
-          ## [{{ version | trim_start_matches(pat="v") }}](https://github.com/${{ github.repository }}/compare/{{ previous.version }}...{{ version }}) ({{ timestamp | date(format="%Y-%m-%d") }})
-          {% else %}\
-          ## [Unreleased]
-          {% endif %}\
-
-          {% for group, commits in commits | group_by(attribute="group") %}
-          ### {{ group }}
-
-          {% for commit in commits %}\
-          * {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | upper_first }} \
-          ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/${{ github.repository }}/commit/{{ commit.id }}))\
-          {% if commit.breaking %} **BREAKING CHANGE**{% endif %}
-
-          {% endfor %}
-          {% endfor %}\n
-          """
-          trim = true
-          footer = ""
-
-          [git]
-          conventional_commits = true
-          filter_unconventional = true
-          split_commits = false
-          tag_pattern = "v[0-9].*"
-          sort_commits = "oldest"
-
-          commit_parsers = [
-              { message = "^feat", group = "Features" },
-              { message = "^fix", group = "Bug Fixes" },
-              { message = "^perf", group = "Performance" },
-              { message = "^refactor", group = "Refactoring" },
-              { message = "^doc|^docs", group = "Documentation" },
-              { message = "^test", group = "Testing" },
-              { message = "^chore\\(deps\\)", group = "Dependency Updates" },
-              { message = "^chore", skip = true },
-              { message = "^ci", skip = true },
-              { message = "^style", skip = true },
-              { body = ".*security", group = "Security" },
-          ]
-
-          protect_breaking_commits = false
-          filter_commits = true
-          EOF
-            git add cliff.toml
-          fi
-
-          touch CHANGELOG.md
-          git-cliff --config cliff.toml --tag "v${{ steps.version.outputs.release_version }}" --unreleased --prepend CHANGELOG.md
-          git-cliff --config cliff.toml --tag "v${{ steps.version.outputs.release_version }}" --latest --strip header > RELEASE_NOTES.md
-
-          git add CHANGELOG.md
-          git commit -m "chore: Changelog for Release ${{ steps.version.outputs.release_version }}"
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKER_HUB_USER }}
-          password: ${{ secrets.DOCKER_HUB_TOKEN }}
-
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            ${{ env.IMAGE }}
-            ${{ env.DOCKERHUB_IMAGE }}
-          tags: |
-            type=raw,value=${{ steps.version.outputs.release_version }}
-            type=raw,value=${{ steps.version.outputs.release_version_minor }}
-            type=raw,value=latest
-
-      - name: Build and push
-        id: push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            APP_VERSION=${{ steps.version.outputs.release_version }}
-            BUILD_DATE=${{ steps.version.outputs.build_date }}
-          provenance: true
-          sbom: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Attest image (GHCR)
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-name: ${{ env.IMAGE }}
-          subject-digest: ${{ steps.push.outputs.digest }}
-          push-to-registry: true
-
-      - name: Attest image (Docker Hub)
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-name: ${{ env.DOCKERHUB_IMAGE }}
-          subject-digest: ${{ steps.push.outputs.digest }}
-          push-to-registry: true
-
-      - name: Push commits
-        run: git push origin ${{ inputs.default_branch }}
-
-      - name: Create Release on GH
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          gh release create "v${{ steps.version.outputs.release_version }}" \
-            ${{ inputs.draft_release && '--draft' || '' }} \
-            --title "${{ steps.version.outputs.release_version }}" \
-            --notes-file RELEASE_NOTES.md
+    with:
+      images: '["ghcr.io/m13tlabs/nextcloudcmd-cli","docker.io/m13t/nextcloudcmd-cli"]'
+      client_id: ${{ vars.CI_CLIENT_ID }}
+      release_type: ${{ inputs.release_type }}
+      custom_version: ${{ inputs.custom_version }}
+      default_branch: ${{ github.ref_name }}
+      draft_release: ${{ inputs.draft_release }}
+      dockerhub: true
+    secrets: inherit
